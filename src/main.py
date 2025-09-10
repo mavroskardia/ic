@@ -15,6 +15,7 @@ from pathlib import Path
 from PyQt6.QtWidgets import QApplication
 
 from gui.main_window import MainWindow
+from gui.viewing_window import ViewingWindow
 from core.image_manager import ImageManager
 from core.rating_manager import RatingManager
 from core.classifier import ImageClassifier
@@ -59,6 +60,18 @@ def parse_arguments() -> argparse.Namespace:
         "--no-fit-window",
         action="store_true",
         help="Disable automatic fit-to-window for images"
+    )
+    parser.add_argument(
+        "--viewing-mode",
+        action="store_true",
+        help=("Launch in minimal viewing-only mode (no training, just "
+              "navigation, favorites, and delete)")
+    )
+    parser.add_argument(
+        "--fullscreen-mode",
+        action="store_true",
+        help=("Launch in ultra-minimal fullscreen mode (no borders, menus, "
+              "or UI elements - just the image)")
     )
 
     return parser.parse_args()
@@ -146,15 +159,27 @@ def main() -> int:
                 classifier.load_model(model_path)
 
         # Create and show main window
-        main_window = MainWindow(
-            image_manager=image_manager,
-            rating_manager=rating_manager,
-            classifier=classifier,
-            auto_sort=args.sort,
-            accuracy_threshold=args.accuracy,
-            verbose=args.verbose,
-            fit_to_window=not args.no_fit_window  # Default enabled
-        )
+        if args.fullscreen_mode:
+            main_window = ViewingWindow(
+                image_manager=image_manager,
+                fit_to_window=not args.no_fit_window,  # Default enabled
+                fullscreen_mode=True
+            )
+        elif args.viewing_mode:
+            main_window = ViewingWindow(
+                image_manager=image_manager,
+                fit_to_window=not args.no_fit_window  # Default enabled
+            )
+        else:
+            main_window = MainWindow(
+                image_manager=image_manager,
+                rating_manager=rating_manager,
+                classifier=classifier,
+                auto_sort=args.sort,
+                accuracy_threshold=args.accuracy,
+                verbose=args.verbose,
+                fit_to_window=not args.no_fit_window  # Default enabled
+            )
 
         # Connect cleanup signal
         main_window.aboutToQuit.connect(

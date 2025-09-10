@@ -23,12 +23,13 @@ class ImageViewer(QWidget):
     # Signals
     image_clicked = pyqtSignal(int, int)  # x, y coordinates
 
-    def __init__(self, fit_to_window: bool = True):
+    def __init__(self, fit_to_window: bool = True, borderless: bool = False):
         """
         Initialize the image viewer.
 
         Args:
             fit_to_window: Automatically fit images to window when loaded
+            borderless: Remove all borders, controls, and UI elements
         """
         super().__init__()
 
@@ -41,11 +42,16 @@ class ImageViewer(QWidget):
 
         # Settings
         self.fit_to_window = fit_to_window
+        self.borderless = borderless
 
         # Mouse interaction state
         self.is_panning = False
         self.last_mouse_pos = None
         self.crop_mode_active = False
+
+        # Pan position memory
+        self.saved_pan_offset_x = 0
+        self.saved_pan_offset_y = 0
 
         # Setup UI
         self._setup_ui()
@@ -55,60 +61,93 @@ class ImageViewer(QWidget):
 
     def _setup_ui(self) -> None:
         """Setup the user interface."""
-        layout = QVBoxLayout(self)
+        if self.borderless:
+            # Borderless mode - just the image label, no controls or borders
+            self.image_label = QLabel()
+            self.image_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.image_label.setStyleSheet("""
+                QLabel {
+                    background-color: transparent;
+                    border: none;
+                }
+            """)
+            self.image_label.setText("")
 
-        # Image display label
-        self.image_label = QLabel()
-        self.image_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.image_label.setMinimumSize(400, 300)
-        self.image_label.setStyleSheet("""
-            QLabel {
-                background-color: transparent;
-                border: 2px dashed #cccccc;
-                color: #666666;
-            }
-        """)
-        self.image_label.setText("No image loaded")
-        layout.addWidget(self.image_label)
+            # Set the image label as the main widget
+            layout = QVBoxLayout(self)
+            layout.setContentsMargins(0, 0, 0, 0)
+            layout.addWidget(self.image_label)
 
-        # Control buttons
-        button_layout = QHBoxLayout()
+            # Enable mouse tracking for panning
+            self.image_label.setMouseTracking(True)
+            self.image_label.mousePressEvent = self._mouse_press_event
+            self.image_label.mouseMoveEvent = self._mouse_move_event
+            self.image_label.mouseReleaseEvent = self._mouse_release_event
+            self.image_label.wheelEvent = self._wheel_event
 
-        # Zoom controls
-        self.zoom_in_button = QPushButton("Zoom In")
-        self.zoom_in_button.setShortcut("Ctrl++")
-        self.zoom_in_button.clicked.connect(self._zoom_in)
-        button_layout.addWidget(self.zoom_in_button)
+            # No control buttons or zoom label in borderless mode
+            self.zoom_in_button = None
+            self.zoom_out_button = None
+            self.fit_button = None
+            self.reset_button = None
+            self.zoom_label = None
 
-        self.zoom_out_button = QPushButton("Zoom Out")
-        self.zoom_out_button.setShortcut("Ctrl+-")
-        self.zoom_out_button.clicked.connect(self._zoom_out)
-        button_layout.addWidget(self.zoom_out_button)
+        else:
+            # Regular mode with controls and borders
+            layout = QVBoxLayout(self)
 
-        self.fit_button = QPushButton("Fit to Window")
-        self.fit_button.setShortcut("Ctrl+0")
-        self.fit_button.clicked.connect(self._fit_to_window)
-        button_layout.addWidget(self.fit_button)
+            # Image display label
+            self.image_label = QLabel()
+            self.image_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.image_label.setMinimumSize(400, 300)
+            self.image_label.setStyleSheet("""
+                QLabel {
+                    background-color: transparent;
+                    border: 2px dashed #cccccc;
+                    color: #666666;
+                }
+            """)
+            self.image_label.setText("No image loaded")
+            layout.addWidget(self.image_label)
 
-        self.reset_button = QPushButton("Reset View")
-        self.reset_button.setShortcut("Ctrl+R")
-        self.reset_button.clicked.connect(self._reset_view)
-        button_layout.addWidget(self.reset_button)
+            # Control buttons
+            button_layout = QHBoxLayout()
 
-        button_layout.addStretch()
+            # Zoom controls
+            self.zoom_in_button = QPushButton("Zoom In")
+            self.zoom_in_button.setShortcut("Ctrl++")
+            self.zoom_in_button.clicked.connect(self._zoom_in)
+            button_layout.addWidget(self.zoom_in_button)
 
-        # Zoom info
-        self.zoom_label = QLabel("Zoom: 100%")
-        button_layout.addWidget(self.zoom_label)
+            self.zoom_out_button = QPushButton("Zoom Out")
+            self.zoom_out_button.setShortcut("Ctrl+-")
+            self.zoom_out_button.clicked.connect(self._zoom_out)
+            button_layout.addWidget(self.zoom_out_button)
 
-        layout.addLayout(button_layout)
+            self.fit_button = QPushButton("Fit to Window")
+            self.fit_button.setShortcut("Ctrl+0")
+            self.fit_button.clicked.connect(self._fit_to_window)
+            button_layout.addWidget(self.fit_button)
 
-        # Enable mouse tracking for panning
-        self.image_label.setMouseTracking(True)
-        self.image_label.mousePressEvent = self._mouse_press_event
-        self.image_label.mouseMoveEvent = self._mouse_move_event
-        self.image_label.mouseReleaseEvent = self._mouse_release_event
-        self.image_label.wheelEvent = self._wheel_event
+            self.reset_button = QPushButton("Reset View")
+            self.reset_button.setShortcut("Ctrl+R")
+            self.reset_button.clicked.connect(self._reset_view)
+            button_layout.addWidget(self.reset_button)
+
+            button_layout.addStretch()
+
+            # Zoom info
+            self.zoom_label = QLabel("Zoom: 100%")
+            button_layout.addWidget(self.zoom_label)
+
+            layout.addLayout(button_layout)
+
+            # Enable mouse tracking for panning
+            self.image_label.setMouseTracking(True)
+            self.image_label.mousePressEvent = self._mouse_press_event
+            self.image_label.mouseMoveEvent = self._mouse_move_event
+            self.image_label.mouseReleaseEvent = self._mouse_release_event
+            self.image_label.wheelEvent = self._wheel_event
 
     def set_image(self, pixmap: QPixmap) -> None:
         """
@@ -121,6 +160,9 @@ class ImageViewer(QWidget):
             self.clear_image()
             return
 
+        # Save current pan position before changing images
+        self._save_pan_position()
+
         self.original_pixmap = pixmap
 
         # Auto-fit to window if enabled
@@ -129,14 +171,21 @@ class ImageViewer(QWidget):
         else:
             self._reset_view()
 
+        # Restore saved pan position
+        self._restore_pan_position()
+
         self._update_display()
 
     def clear_image(self) -> None:
         """Clear the displayed image."""
         self.original_pixmap = None
         self.display_pixmap = None
-        self.image_label.setText("No image loaded")
-        self.zoom_label.setText("Zoom: 100%")
+        if self.borderless:
+            self.image_label.setText("")
+        else:
+            self.image_label.setText("No image loaded")
+            if self.zoom_label:
+                self.zoom_label.setText("Zoom: 100%")
         self.zoom_factor = 1.0
         self.pan_offset_x = 0
         self.pan_offset_y = 0
@@ -161,10 +210,12 @@ class ImageViewer(QWidget):
         self._apply_pan_offset()
 
         # Update zoom label
-        self.zoom_label.setText(f"Zoom: {self.zoom_factor * 100:.0f}%")
+        if self.zoom_label:
+            self.zoom_label.setText(f"Zoom: {self.zoom_factor * 100:.0f}%")
 
         # Update button states
-        self._update_button_states()
+        if not self.borderless:
+            self._update_button_states()
 
     def _apply_pan_offset(self) -> None:
         """Apply pan offset to the display pixmap."""
@@ -200,6 +251,9 @@ class ImageViewer(QWidget):
 
     def _update_button_states(self) -> None:
         """Update the enabled state of control buttons."""
+        if self.borderless:
+            return  # No buttons in borderless mode
+
         has_image = self.original_pixmap is not None
         can_zoom_in = has_image and self.zoom_factor < 5.0
         can_zoom_out = has_image and self.zoom_factor > 0.1
@@ -220,6 +274,7 @@ class ImageViewer(QWidget):
         self.zoom_factor *= 1.25
         self.zoom_factor = min(self.zoom_factor, 5.0)
         self._update_display()
+        self._save_pan_position()
 
     def _zoom_out(self) -> None:
         """Zoom out by 25%."""
@@ -229,6 +284,7 @@ class ImageViewer(QWidget):
         self.zoom_factor /= 1.25
         self.zoom_factor = max(self.zoom_factor, 0.1)
         self._update_display()
+        self._save_pan_position()
 
     def _fit_to_window(self) -> None:
         """Fit the image to the window size."""
@@ -283,6 +339,9 @@ class ImageViewer(QWidget):
 
             # Update display
             self._update_display()
+
+            # Save pan position for next image
+            self._save_pan_position()
 
     def _mouse_release_event(self, event: QMouseEvent) -> None:
         """Handle mouse release events."""
@@ -427,3 +486,20 @@ class ImageViewer(QWidget):
             self.is_panning = False
             self.last_mouse_pos = None
             self.setCursor(Qt.CursorShape.ArrowCursor)
+
+    def _save_pan_position(self) -> None:
+        """Save the current pan position for restoration on next image."""
+        self.saved_pan_offset_x = self.pan_offset_x
+        self.saved_pan_offset_y = self.pan_offset_y
+
+    def _restore_pan_position(self) -> None:
+        """Restore the saved pan position."""
+        self.pan_offset_x = self.saved_pan_offset_x
+        self.pan_offset_y = self.saved_pan_offset_y
+
+    def reset_pan_memory(self) -> None:
+        """Reset the pan position memory to center."""
+        self.saved_pan_offset_x = 0
+        self.saved_pan_offset_y = 0
+        self.pan_offset_x = 0
+        self.pan_offset_y = 0
