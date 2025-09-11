@@ -390,6 +390,44 @@ class ViewingWindow(QMainWindow):
         self.image_viewer.reset_pan_memory()
         self._load_current_image()  # Reload current image with reset pan position
 
+    def _navigate_by_offset(self, offset: int) -> None:
+        """Navigate by a specific offset from current position."""
+        current_index = self.image_manager.current_index
+        target_index = current_index + offset
+
+        # Clamp to valid range
+        max_index = len(self.image_manager.image_files) - 1
+        target_index = max(0, min(target_index, max_index))
+
+        if target_index != current_index:
+            self.image_manager.go_to_image(target_index)
+
+    def _go_to_image_prompt(self) -> None:
+        """Prompt user to enter an image number to jump to."""
+        from PyQt6.QtWidgets import QInputDialog
+
+        total_images = len(self.image_manager.image_files)
+        if total_images == 0:
+            return
+
+        current_image_num = self.image_manager.current_index + 1
+
+        # Show input dialog
+        number, ok = QInputDialog.getInt(
+            self,
+            "Go to Image",
+            f"Enter image number (1-{total_images}):",
+            current_image_num,
+            1,
+            total_images,
+            1
+        )
+
+        if ok:
+            # Convert to 0-based index
+            target_index = number - 1
+            self.image_manager.go_to_image(target_index)
+
     def keyPressEvent(self, event) -> None:
         """Handle key press events."""
         if event.key() == Qt.Key.Key_Left:
@@ -422,6 +460,15 @@ class ViewingWindow(QMainWindow):
         elif event.key() == Qt.Key.Key_C:
             # C key - reset pan position memory
             self._reset_pan_memory()
+        elif event.key() == Qt.Key.Key_PageUp:
+            # Page Up - go back 10 images
+            self._navigate_by_offset(-10)
+        elif event.key() == Qt.Key.Key_PageDown:
+            # Page Down - go forward 10 images
+            self._navigate_by_offset(10)
+        elif event.key() == Qt.Key.Key_G:
+            # G key - go to specific image number
+            self._go_to_image_prompt()
         else:
             super().keyPressEvent(event)
 
