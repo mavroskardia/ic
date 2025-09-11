@@ -53,6 +53,10 @@ class ImageViewer(QWidget):
         self.saved_pan_offset_x = 0
         self.saved_pan_offset_y = 0
 
+        # Zoom level memory
+        self.saved_zoom_factor = 1.0
+        self.user_has_zoomed = False  # Track if user has manually zoomed
+
         # Setup UI
         self._setup_ui()
 
@@ -160,16 +164,19 @@ class ImageViewer(QWidget):
             self.clear_image()
             return
 
-        # Save current pan position before changing images
+        # Save current pan position and zoom level before changing images
         self._save_pan_position()
+        self._save_zoom_level()
 
         self.original_pixmap = pixmap
 
-        # Auto-fit to window if enabled
-        if self.fit_to_window:
+        # Auto-fit to window if enabled, but only if user hasn't manually zoomed
+        if self.fit_to_window and not self.user_has_zoomed:
             self._fit_to_window()
         else:
-            self._reset_view()
+            # Restore zoom level if user has manually zoomed or
+            # fit_to_window is disabled
+            self._restore_zoom_level()
 
         # Restore saved pan position
         self._restore_pan_position()
@@ -258,8 +265,8 @@ class ImageViewer(QWidget):
         can_zoom_in = has_image and self.zoom_factor < 5.0
         can_zoom_out = has_image and self.zoom_factor > 0.1
         can_reset = has_image and (self.zoom_factor != 1.0 or
-                                  self.pan_offset_x != 0 or
-                                  self.pan_offset_y != 0)
+                                   self.pan_offset_x != 0 or
+                                   self.pan_offset_y != 0)
 
         self.zoom_in_button.setEnabled(can_zoom_in)
         self.zoom_out_button.setEnabled(can_zoom_out)
@@ -273,8 +280,10 @@ class ImageViewer(QWidget):
 
         self.zoom_factor *= 1.25
         self.zoom_factor = min(self.zoom_factor, 5.0)
+        self.user_has_zoomed = True  # Mark that user has manually zoomed
         self._update_display()
         self._save_pan_position()
+        self._save_zoom_level()
 
     def _zoom_out(self) -> None:
         """Zoom out by 25%."""
@@ -283,8 +292,10 @@ class ImageViewer(QWidget):
 
         self.zoom_factor /= 1.25
         self.zoom_factor = max(self.zoom_factor, 0.1)
+        self.user_has_zoomed = True  # Mark that user has manually zoomed
         self._update_display()
         self._save_pan_position()
+        self._save_zoom_level()
 
     def _fit_to_window(self) -> None:
         """Fit the image to the window size."""
@@ -312,7 +323,9 @@ class ImageViewer(QWidget):
         self.zoom_factor = 1.0
         self.pan_offset_x = 0
         self.pan_offset_y = 0
+        self.user_has_zoomed = False  # Reset manual zoom flag
         self._update_display()
+        self._save_zoom_level()
 
     def _mouse_press_event(self, event: QMouseEvent) -> None:
         """Handle mouse press events."""
@@ -497,9 +510,21 @@ class ImageViewer(QWidget):
         self.pan_offset_x = self.saved_pan_offset_x
         self.pan_offset_y = self.saved_pan_offset_y
 
+    def _save_zoom_level(self) -> None:
+        """Save the current zoom level for restoration on next image."""
+        self.saved_zoom_factor = self.zoom_factor
+
+    def _restore_zoom_level(self) -> None:
+        """Restore the saved zoom level."""
+        self.zoom_factor = self.saved_zoom_factor
+
     def reset_pan_memory(self) -> None:
         """Reset the pan position memory to center."""
         self.saved_pan_offset_x = 0
         self.saved_pan_offset_y = 0
         self.pan_offset_x = 0
         self.pan_offset_y = 0
+        # Also reset zoom memory
+        self.saved_zoom_factor = 1.0
+        self.zoom_factor = 1.0
+        self.user_has_zoomed = False  # Reset manual zoom flag

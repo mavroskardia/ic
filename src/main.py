@@ -73,6 +73,11 @@ def parse_arguments() -> argparse.Namespace:
         help=("Launch in ultra-minimal fullscreen mode (no borders, menus, "
               "or UI elements - just the image)")
     )
+    parser.add_argument(
+        "--max-files",
+        type=int,
+        help="Maximum number of images to discover initially (for performance)"
+    )
 
     return parser.parse_args()
 
@@ -149,7 +154,7 @@ def main() -> int:
 
         # Initialize core components
         rating_manager = RatingManager(db_path)
-        image_manager = ImageManager(image_path)
+        image_manager = ImageManager(image_path, max_files=args.max_files)
         classifier = ImageClassifier()
 
         # Load pre-trained model if specified

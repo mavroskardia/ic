@@ -32,17 +32,20 @@ class ImageManager(QObject):
     image_changed = pyqtSignal(Path, int, int)  # path, current, total
     progress_updated = pyqtSignal(int, int, float)  # current, total, %
 
-    def __init__(self, root_directory: Path, cache_size: int = 10):
+    def __init__(self, root_directory: Path, cache_size: int = 10,
+                 max_files: int = None):
         """
         Initialize the Image Manager.
 
         Args:
             root_directory: Root directory containing images
             cache_size: Maximum number of images to cache
+            max_files: Optional max images to discover (for performance)
         """
         super().__init__()
         self.root_directory = root_directory
         self.cache_size = cache_size
+        self.max_files = max_files
 
         # Image collection
         self.image_files: List[Path] = []
@@ -105,7 +108,14 @@ class ImageManager(QObject):
     def _discover_images(self) -> None:
         """Discover all image files in the root directory."""
         try:
-            self.image_files = get_image_files(self.root_directory)
+            self.logger.info(f"Discovering images in {self.root_directory}")
+            if self.max_files:
+                self.logger.info(
+                    f"Limiting discovery to {self.max_files} files"
+                )
+
+            self.image_files = get_image_files(self.root_directory,
+                                               self.max_files)
             self.logger.info(f"Discovered {len(self.image_files)} images")
 
             if self.image_files:
@@ -505,3 +515,43 @@ class ImageManager(QObject):
                 exc_info=True
             )
             return False
+
+    def discover_more_images(self, additional_limit: int = 1000) -> int:
+        """
+        Discover additional images beyond the initial limit.
+
+        Args:
+            additional_limit: Number of additional images to discover
+
+        Returns:
+            Number of new images discovered
+        """
+        if not self.max_files:
+            self.logger.info(
+                "No file limit set, all images already discovered"
+            )
+            return 0
+
+        try:
+            # Get current count
+            current_count = len(self.image_files)
+
+            # Discover more images with a higher limit
+            new_limit = current_count + additional_limit
+            self.logger.info(f"Discovering more images (limit: {new_limit})")
+
+            # Temporarily update max_files and rediscover
+            old_max_files = self.max_files
+            self.max_files = new_limit
+            self._discover_images()
+            self.max_files = old_max_files
+
+            new_count = len(self.image_files)
+            discovered = new_count - current_count
+
+            self.logger.info(f"Discovered {discovered} additional images")
+            return discovered
+
+        except Exception as e:
+            self.logger.error(f"Error discovering more images: {e}")
+            return 0

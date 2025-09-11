@@ -50,12 +50,15 @@ def ensure_directory_exists(path: Path) -> None:
     path.mkdir(parents=True, exist_ok=True)
 
 
-def get_image_files(directory: Path) -> List[Path]:
+def get_image_files(directory: Path, max_files: int = None) -> List[Path]:
     """
     Get all image files from a directory and its subdirectories.
 
+    Uses optimized os.scandir() for better performance with large directories.
+
     Args:
         directory: Root directory to search
+        max_files: Optional max files to return (for early termination)
 
     Returns:
         List of image file paths
@@ -63,11 +66,30 @@ def get_image_files(directory: Path) -> List[Path]:
     image_extensions = {'.jpg', '.jpeg', '.png'}
     image_files = []
 
-    for file_path in directory.rglob("*"):
-        if (file_path.is_file() and
-                file_path.suffix.lower() in image_extensions):
-            image_files.append(file_path)
+    def _scan_directory(path: Path) -> None:
+        """Recursively scan directory using os.scandir()."""
+        if max_files and len(image_files) >= max_files:
+            return
 
+        try:
+            with os.scandir(path) as entries:
+                for entry in entries:
+                    if max_files and len(image_files) >= max_files:
+                        break
+
+                    if entry.is_file():
+                        # Check extension during traversal
+                        if entry.name.lower().endswith(
+                                tuple(image_extensions)):
+                            image_files.append(Path(entry.path))
+                    elif entry.is_dir():
+                        # Recursively scan subdirectories
+                        _scan_directory(Path(entry.path))
+        except (PermissionError, OSError):
+            # Skip directories we can't access
+            pass
+
+    _scan_directory(directory)
     return sorted(image_files)
 
 
