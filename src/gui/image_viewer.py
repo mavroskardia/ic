@@ -655,6 +655,16 @@ class ImageViewer(QWidget):
 
     def keyPressEvent(self, event: QKeyEvent) -> None:
         """Handle key press events."""
+        # Forward to window overlay so user can see discovered key names
+        try:
+            parent_win = self.parent()
+            if hasattr(parent_win, 'window'):
+                parent_win = parent_win.window()
+            if parent_win and hasattr(parent_win, '_show_input_overlay'):
+                parent_win._show_input_overlay(event)
+        except Exception:
+            pass
+
         if event.key() == Qt.Key.Key_Plus or event.key() == Qt.Key.Key_Equal:
             self._zoom_in()
         elif event.key() == Qt.Key.Key_Minus:

@@ -95,6 +95,24 @@ class ViewingWindow(QMainWindow):
         # Internal: whether the next image load should use a smooth transition
         self._slideshow_transition = False
 
+        # Temporary input overlay for debugging key inputs
+        self._input_overlay = QLabel(self)
+        self._input_overlay.setStyleSheet(
+            """
+            QLabel {
+                background-color: rgba(0, 0, 0, 140);
+                color: #FFFFFF;
+                padding: 6px 10px;
+                border-radius: 6px;
+                font: 12pt "Segoe UI";
+            }
+            """
+        )
+        self._input_overlay.hide()
+        self._input_overlay_timer = QTimer(self)
+        self._input_overlay_timer.setSingleShot(True)
+        self._input_overlay_timer.timeout.connect(self._input_overlay.hide)
+
     def _setup_ui(self) -> None:
         """Setup the minimal user interface."""
         if self.fullscreen_mode:
@@ -529,6 +547,8 @@ class ViewingWindow(QMainWindow):
 
     def keyPressEvent(self, event) -> None:
         """Handle key press events."""
+        # Show temporary overlay of the received key for discovery
+        self._show_input_overlay(event)
         if event.key() == Qt.Key.Key_Left:
             self._previous_one_image()
         elif event.key() == Qt.Key.Key_Right:
@@ -610,3 +630,44 @@ class ViewingWindow(QMainWindow):
         # Emit signal for cleanup
         self.aboutToQuit.emit()
         super().closeEvent(event)
+
+    def _show_input_overlay(self, event) -> None:
+        """Display the last key input briefly on screen and print to console."""
+        try:
+            # Build human-friendly key string with modifiers
+            mods = []
+            if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
+                mods.append("Ctrl")
+            if event.modifiers() & Qt.KeyboardModifier.AltModifier:
+                mods.append("Alt")
+            if event.modifiers() & Qt.KeyboardModifier.ShiftModifier:
+                mods.append("Shift")
+            if event.modifiers() & Qt.KeyboardModifier.MetaModifier:
+                mods.append("Meta")
+
+            key_seq = None
+            try:
+                from PyQt6.QtGui import QKeySequence
+                key_seq = QKeySequence(int(event.modifiers()) | event.key()).toString()
+            except Exception:
+                key_seq = ""
+
+            parts = [" + ".join(mods)] if mods else []
+            key_name = key_seq if key_seq else str(event.key())
+            parts.append(key_name)
+            text = "".join(parts) if parts else key_name
+
+            # Print to console for logging
+            print(f"Key input: key={event.key()} mods={int(event.modifiers())} name={text}")
+
+            # Show overlay
+            self._input_overlay.setText(text)
+            # Position top-left with margin
+            self._input_overlay.adjustSize()
+            self._input_overlay.move(12, 12)
+            self._input_overlay.raise_()
+            self._input_overlay.show()
+            self._input_overlay_timer.start(1200)
+        except Exception:
+            # Best-effort; do not crash on overlay errors
+            pass
