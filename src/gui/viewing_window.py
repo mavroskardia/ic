@@ -13,6 +13,7 @@ from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QMessageBox
 )
+from typing import Optional
 from PyQt6.QtCore import Qt, pyqtSlot, pyqtSignal, QTimer
 from PyQt6.QtGui import QKeySequence, QFont, QAction
 
@@ -40,7 +41,9 @@ class ViewingWindow(QMainWindow):
     def __init__(self, image_manager: ImageManager,
                  fit_to_window: bool = True, fullscreen_mode: bool = False,
                  slideshow_interval: float = 5.0,
-                 transition_duration: float = 0.8):
+                 transition_duration: float = 0.8,
+                 background_color: Optional[str] = None,
+                 rotate_deg: float = 0.0):
         """
         Initialize the viewing window.
 
@@ -58,6 +61,8 @@ class ViewingWindow(QMainWindow):
         self.fullscreen_mode = fullscreen_mode
         self.slideshow_interval = slideshow_interval
         self.transition_duration = transition_duration
+        self.background_color = background_color
+        self.rotate_deg = rotate_deg
 
         # Shuffle state
         self.is_shuffled = False
@@ -102,11 +107,18 @@ class ViewingWindow(QMainWindow):
             # Remove window frame and decorations
             self.setWindowFlags(Qt.WindowType.FramelessWindowHint)
 
-            # Set completely transparent background
-            self.setStyleSheet(
-                "QMainWindow { background-color: transparent; }"
-            )
-            self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+            # Set background: transparent by default, or user-specified color
+            if self.background_color:
+                style_bg = (
+                    "QMainWindow {{ background-color: {}; }}"
+                    .format(self.background_color)
+                )
+                self.setStyleSheet(style_bg)
+            else:
+                self.setStyleSheet(
+                    "QMainWindow { background-color: transparent; }"
+                )
+                self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
 
             # Window properties for fullscreen
             self.setWindowTitle("Image Viewer - Fullscreen")
@@ -536,6 +548,17 @@ class ViewingWindow(QMainWindow):
         elif event.key() == Qt.Key.Key_C:
             # C key - reset pan position memory
             self._reset_pan_memory()
+        elif event.key() == Qt.Key.Key_R:
+            # Rotate 90 degrees clockwise
+            if self.slideshow_active:
+                self._stop_slideshow()
+            # Increment rotation and normalize to [0, 360)
+            try:
+                self.rotate_deg = (float(self.rotate_deg) + 90.0) % 360.0
+            except Exception:
+                self.rotate_deg = 90.0
+            # Reload current image with new rotation
+            self._load_current_image()
         elif event.key() == Qt.Key.Key_PageUp:
             # Stop slideshow if active
             if self.slideshow_active:

@@ -93,6 +93,23 @@ def parse_arguments() -> argparse.Namespace:
             "(default: 0.8)"
         )
     )
+    parser.add_argument(
+        "--background-color",
+        type=str,
+        help=(
+            "Background color for fullscreen mode (e.g. '#000' or 'black'). "
+            "Defaults to transparent if not specified."
+        )
+    )
+    parser.add_argument(
+        "--rotate-deg",
+        type=float,
+        default=0.0,
+        help=(
+            "Rotate images by the given degrees clockwise (e.g. 90). "
+            "Default: 0 (no rotation)."
+        )
+    )
 
     return parser.parse_args()
 
@@ -191,7 +208,9 @@ def main() -> int:
                 fit_to_window=not args.no_fit_window,  # Default enabled
                 fullscreen_mode=True,
                 slideshow_interval=args.slideshow_interval,
-                transition_duration=args.transition_duration
+                transition_duration=args.transition_duration,
+                background_color=args.background_color,
+                rotate_deg=args.rotate_deg
             )
         elif args.viewing_mode:
             main_window = ViewingWindow(

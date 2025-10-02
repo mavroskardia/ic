@@ -13,7 +13,7 @@ from PyQt6.QtCore import (
     Qt, pyqtSignal, QRect, QPropertyAnimation, QEasingCurve, pyqtProperty
 )
 from PyQt6.QtGui import (
-    QPixmap, QPainter, QWheelEvent, QMouseEvent, QKeyEvent
+    QPixmap, QPainter, QWheelEvent, QMouseEvent, QKeyEvent, QTransform
 )
 
 
@@ -233,6 +233,30 @@ class ImageViewer(QWidget):
 
         return final_pixmap
 
+    def _get_rotate_degrees(self) -> float:
+        """Get rotation degrees from parent window if provided."""
+        rotate_degrees = 0.0
+        parent_win = self.parent()
+        if hasattr(parent_win, 'window'):
+            parent_win = parent_win.window()
+        if parent_win and hasattr(parent_win, 'rotate_deg'):
+            try:
+                rotate_degrees = float(parent_win.rotate_deg)
+            except Exception:
+                rotate_degrees = 0.0
+        return rotate_degrees
+
+    def _apply_rotation(self, pixmap: QPixmap) -> QPixmap:
+        """Return a rotated copy of the pixmap based on configured degrees."""
+        deg = self._get_rotate_degrees()
+        if pixmap is None or (deg % 360 == 0):
+            return pixmap
+        transform = QTransform()
+        transform.rotate(deg)
+        return pixmap.transformed(
+            transform, Qt.TransformationMode.SmoothTransformation
+        )
+
     def _ensure_effects(self) -> None:
         """Ensure opacity effects exist on base and overlay labels."""
         if self._base_opacity_effect is None:
@@ -369,12 +393,16 @@ class ImageViewer(QWidget):
         self.pan_offset_x = self.saved_pan_offset_x
         self.pan_offset_y = self.saved_pan_offset_y
 
-        # Calculate scaled size for the new image
-        scaled_width = int(self.original_pixmap.width() * self.zoom_factor)
-        scaled_height = int(self.original_pixmap.height() * self.zoom_factor)
+        # Apply rotation prior to scaling
+        rotated_source = self._apply_rotation(self.original_pixmap)
+
+        # If fit-to-window used original size, recompute target dimensions
+        # from the rotated source dimensions for better fidelity.
+        scaled_width = int(rotated_source.width() * self.zoom_factor)
+        scaled_height = int(rotated_source.height() * self.zoom_factor)
 
         # Create scaled pixmap
-        self.display_pixmap = self.original_pixmap.scaled(
+        self.display_pixmap = rotated_source.scaled(
             scaled_width, scaled_height,
             Qt.AspectRatioMode.KeepAspectRatio,
             Qt.TransformationMode.SmoothTransformation
@@ -405,8 +433,10 @@ class ImageViewer(QWidget):
         scaled_width = int(self.original_pixmap.width() * self.zoom_factor)
         scaled_height = int(self.original_pixmap.height() * self.zoom_factor)
 
-        # Create scaled pixmap
-        self.display_pixmap = self.original_pixmap.scaled(
+        # Create scaled pixmap (with optional rotation)
+        source_pixmap = self._apply_rotation(self.original_pixmap)
+
+        self.display_pixmap = source_pixmap.scaled(
             scaled_width, scaled_height,
             Qt.AspectRatioMode.KeepAspectRatio,
             Qt.TransformationMode.SmoothTransformation
