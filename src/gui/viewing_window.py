@@ -466,6 +466,29 @@ class ViewingWindow(QMainWindow):
         # Do not call _load_current_image here; let the image_changed signal
         # trigger a single load using the smooth transition flag
 
+    def _reset_slideshow_timer_if_active(self) -> None:
+        """Reset slideshow timer to full interval if slideshow is active."""
+        if self.slideshow_active:
+            self.slideshow_timer.start(int(self.slideshow_interval * 1000))
+
+    def _advance_one_image(self) -> None:
+        """Advance a single image, honoring slideshow and transitions."""
+        self._slideshow_transition = True
+        if not self.image_manager.next_image():
+            # If at end, wrap to first
+            self.image_manager.go_to_image(0)
+        self._reset_slideshow_timer_if_active()
+
+    def _previous_one_image(self) -> None:
+        """Go to previous image, honoring slideshow and transitions."""
+        self._slideshow_transition = True
+        if not self.image_manager.previous_image():
+            # If at start, wrap to last
+            last_index = len(self.image_manager.image_files) - 1
+            if last_index >= 0:
+                self.image_manager.go_to_image(last_index)
+        self._reset_slideshow_timer_if_active()
+
     def _navigate_by_offset(self, offset: int) -> None:
         """Navigate by a specific offset from current position."""
         current_index = self.image_manager.current_index
@@ -507,24 +530,20 @@ class ViewingWindow(QMainWindow):
     def keyPressEvent(self, event) -> None:
         """Handle key press events."""
         if event.key() == Qt.Key.Key_Left:
-            # Stop slideshow if active
-            if self.slideshow_active:
-                self._stop_slideshow()
-            self.image_manager.previous_image()
+            self._previous_one_image()
         elif event.key() == Qt.Key.Key_Right:
-            # Stop slideshow if active
-            if self.slideshow_active:
-                self._stop_slideshow()
-            self.image_manager.next_image()
+            self._advance_one_image()
         elif event.key() == Qt.Key.Key_Space:
-            # Stop slideshow if active
-            if self.slideshow_active:
-                self._stop_slideshow()
             # Toggle between next/previous
             if event.modifiers() & Qt.KeyboardModifier.ShiftModifier:
-                self.image_manager.previous_image()
+                self._previous_one_image()
             else:
-                self.image_manager.next_image()
+                self._advance_one_image()
+        elif event.key() == Qt.Key.Key_D or event.key() == Qt.Key.Key_L:
+            # Common forward intention keys
+            self._advance_one_image()
+        elif event.key() == Qt.Key.Key_MediaNext:
+            self._advance_one_image()
         elif event.key() == Qt.Key.Key_Delete:
             self._delete_current_image()
         elif event.key() == Qt.Key.Key_F:
@@ -560,17 +579,13 @@ class ViewingWindow(QMainWindow):
             # Reload current image with new rotation
             self._load_current_image()
         elif event.key() == Qt.Key.Key_PageUp:
-            # Stop slideshow if active
-            if self.slideshow_active:
-                self._stop_slideshow()
             # Page Up - go back 10 images
             self._navigate_by_offset(-10)
+            self._reset_slideshow_timer_if_active()
         elif event.key() == Qt.Key.Key_PageDown:
-            # Stop slideshow if active
-            if self.slideshow_active:
-                self._stop_slideshow()
             # Page Down - go forward 10 images
             self._navigate_by_offset(10)
+            self._reset_slideshow_timer_if_active()
         elif event.key() == Qt.Key.Key_G:
             # G key - go to specific image number
             self._go_to_image_prompt()
