@@ -1083,6 +1083,11 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event) -> None:
         """Handle window close event."""
+        # Print current image index to console
+        current_index = self.image_manager.current_index
+        total_count = self.image_manager.get_total_count()
+        if total_count > 0:
+            print(f"Exiting at image {current_index + 1} of {total_count}")
         # Stop training worker if running
         if self.training_worker and self.training_worker.isRunning():
             self.training_worker.stop()

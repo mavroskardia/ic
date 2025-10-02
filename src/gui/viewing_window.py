@@ -81,14 +81,18 @@ class ViewingWindow(QMainWindow):
         """Setup the minimal user interface."""
         if self.fullscreen_mode:
             # Fullscreen mode - just the image viewer, no borders or UI
-            self.image_viewer = ImageViewer(fit_to_window=self.fit_to_window, borderless=True)
+            self.image_viewer = ImageViewer(
+                fit_to_window=self.fit_to_window, borderless=True
+            )
             self.setCentralWidget(self.image_viewer)
 
             # Remove window frame and decorations
             self.setWindowFlags(Qt.WindowType.FramelessWindowHint)
 
             # Set completely transparent background
-            self.setStyleSheet("QMainWindow { background-color: transparent; }")
+            self.setStyleSheet(
+                "QMainWindow { background-color: transparent; }"
+            )
             self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
 
             # Window properties for fullscreen
@@ -347,10 +351,13 @@ class ViewingWindow(QMainWindow):
             # Provide visual feedback with a flash effect
             self._show_favorites_flash()
         else:
+            # Get log file location for user
+            from utils.file_utils import get_app_data_dir
+            log_file = get_app_data_dir() / "logs" / "image_classifier.log"
             QMessageBox.warning(
                 self, "Favorites Failed",
-                ("Failed to add the image to favorites. Check the log file "
-                 "for details.")
+                f"Failed to add the image to favorites. "
+                f"Check the log file for details:\n\n{log_file}"
             )
 
     def _show_favorites_flash(self) -> None:
@@ -388,7 +395,8 @@ class ViewingWindow(QMainWindow):
     def _reset_pan_memory(self) -> None:
         """Reset the pan position memory to center."""
         self.image_viewer.reset_pan_memory()
-        self._load_current_image()  # Reload current image with reset pan position
+        # Reload current image with reset pan position
+        self._load_current_image()
 
     def _navigate_by_offset(self, offset: int) -> None:
         """Navigate by a specific offset from current position."""
@@ -474,6 +482,11 @@ class ViewingWindow(QMainWindow):
 
     def closeEvent(self, event) -> None:
         """Handle window close event."""
+        # Print current image index to console
+        current_index = self.image_manager.current_index
+        total_count = self.image_manager.get_total_count()
+        if total_count > 0:
+            print(f"Exiting at image {current_index + 1} of {total_count}")
         # Emit signal for cleanup
         self.aboutToQuit.emit()
         super().closeEvent(event)

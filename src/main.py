@@ -157,6 +157,12 @@ def main() -> int:
         image_manager = ImageManager(image_path, max_files=args.max_files)
         classifier = ImageClassifier()
 
+        # Print favorites storage location to console
+        app_data_dir = get_app_data_dir()
+        favorites_dir = app_data_dir / "favorites"
+        print(f"Favorited files will be stored in: {favorites_dir}")
+        print(f"Application data directory: {app_data_dir}")
+
         # Load pre-trained model if specified
         if args.model:
             model_path = Path(args.model)
