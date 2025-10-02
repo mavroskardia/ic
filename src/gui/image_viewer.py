@@ -6,10 +6,11 @@ capabilities.
 """
 
 from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
+    QGraphicsOpacityEffect
 )
 from PyQt6.QtCore import (
-    Qt, pyqtSignal, QRect, QPropertyAnimation, QEasingCurve
+    Qt, pyqtSignal, QRect, QPropertyAnimation, QEasingCurve, pyqtProperty
 )
 from PyQt6.QtGui import (
     QPixmap, QPainter, QWheelEvent, QMouseEvent, QKeyEvent
@@ -65,9 +66,14 @@ class ImageViewer(QWidget):
         self.user_has_zoomed = False  # Track if user has manually zoomed
 
         # Transition properties
-        self.transition_opacity = 1.0
+        self._transition_opacity = 1.0
         self.transition_animation = None
         self.next_pixmap = None  # Store next image for transition
+
+        # Double buffering for smooth transitions
+        self.visible_buffer = None  # Currently displayed pixmap
+        self.hidden_buffer = None   # Buffer being prepared for transition
+        self._buffer_opacity = 1.0  # Opacity of the hidden buffer
 
         # Setup UI
         self._setup_ui()
@@ -165,6 +171,29 @@ class ImageViewer(QWidget):
             self.image_label.mouseReleaseEvent = self._mouse_release_event
             self.image_label.wheelEvent = self._wheel_event
 
+        # Setup overlay label for crossfade transitions
+        self._setup_overlay_label()
+
+    def _setup_overlay_label(self) -> None:
+        """Create an overlay QLabel used for crossfade transitions."""
+        self.overlay_label = QLabel(self)
+        self.overlay_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.overlay_label.setStyleSheet("""
+            QLabel {
+                background-color: transparent;
+                border: none;
+            }
+        """)
+        self.overlay_label.setAttribute(
+            Qt.WidgetAttribute.WA_TransparentForMouseEvents
+        )
+        self.overlay_label.hide()
+        # Opacity effects for base and overlay
+        self._base_opacity_effect = None
+        self._overlay_opacity_effect = None
+        self._fade_out_anim = None
+        self._fade_in_anim = None
+
     def set_image(self, pixmap: QPixmap,
                   smooth_transition: bool = False) -> None:
         """
@@ -180,11 +209,109 @@ class ImageViewer(QWidget):
 
         if (smooth_transition and
                 self.original_pixmap is not None):
-            # Start smooth transition
-            self._start_smooth_transition(pixmap)
+            # Start crossfade transition
+            self._start_crossfade_transition(pixmap)
         else:
             # Direct image change
             self._set_image_direct(pixmap)
+
+    def _compose_from_scaled(self, scaled_pixmap: QPixmap) -> QPixmap:
+        """Compose final label-sized pixmap from a scaled image using pan."""
+        label_size = self.image_label.size()
+        final_pixmap = QPixmap(label_size)
+        final_pixmap.fill(Qt.GlobalColor.transparent)
+
+        painter = QPainter(final_pixmap)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        x = (label_size.width() - scaled_pixmap.width()) // 2
+        y = (label_size.height() - scaled_pixmap.height()) // 2
+        x += int(self.pan_offset_x)
+        y += int(self.pan_offset_y)
+        painter.drawPixmap(x, y, scaled_pixmap)
+        painter.end()
+
+        return final_pixmap
+
+    def _ensure_effects(self) -> None:
+        """Ensure opacity effects exist on base and overlay labels."""
+        if self._base_opacity_effect is None:
+            self._base_opacity_effect = QGraphicsOpacityEffect(
+                self.image_label
+            )
+            self._base_opacity_effect.setOpacity(1.0)
+            self.image_label.setGraphicsEffect(self._base_opacity_effect)
+        if self._overlay_opacity_effect is None:
+            self._overlay_opacity_effect = QGraphicsOpacityEffect(
+                self.overlay_label
+            )
+            self._overlay_opacity_effect.setOpacity(0.0)
+            self.overlay_label.setGraphicsEffect(self._overlay_opacity_effect)
+
+    def _start_crossfade_transition(self, next_pixmap: QPixmap) -> None:
+        """
+        Crossfade old image to new using overlaid labels and opacity effects.
+        """
+        # Prepare scaled/composed pixmap for the next image
+        self._set_image_for_transition(next_pixmap)
+        next_composed = self._compose_from_scaled(self.display_pixmap)
+
+        # Place next image on overlay
+        self.overlay_label.setPixmap(next_composed)
+        self.overlay_label.setGeometry(self.image_label.geometry())
+        self.overlay_label.raise_()
+        self.overlay_label.show()
+
+        # Ensure effects
+        self._ensure_effects()
+        self._base_opacity_effect.setOpacity(1.0)
+        self._overlay_opacity_effect.setOpacity(0.0)
+
+        # Create animations
+        if self._fade_out_anim is not None:
+            self._fade_out_anim.stop()
+        if self._fade_in_anim is not None:
+            self._fade_in_anim.stop()
+
+        self._fade_out_anim = QPropertyAnimation(
+            self._base_opacity_effect, b"opacity"
+        )
+        # Duration is configured via parent (ViewingWindow) if present
+        duration_ms = 800
+        parent_win = self.parent()
+        if hasattr(parent_win, 'window'):
+            parent_win = parent_win.window()
+        if parent_win and hasattr(parent_win, 'transition_duration'):
+            try:
+                duration_ms = int(float(parent_win.transition_duration) * 1000)
+            except Exception:
+                duration_ms = 800
+        self._fade_out_anim.setDuration(duration_ms)
+        self._fade_out_anim.setStartValue(1.0)
+        self._fade_out_anim.setEndValue(0.0)
+        self._fade_out_anim.setEasingCurve(QEasingCurve.Type.InOutCubic)
+
+        self._fade_in_anim = QPropertyAnimation(
+            self._overlay_opacity_effect, b"opacity"
+        )
+        self._fade_in_anim.setDuration(duration_ms)
+        self._fade_in_anim.setStartValue(0.0)
+        self._fade_in_anim.setEndValue(1.0)
+        self._fade_in_anim.setEasingCurve(QEasingCurve.Type.InOutCubic)
+
+        def on_finished():
+            # Commit the new image to the base label and clean up overlay
+            self.image_label.setPixmap(next_composed)
+            self._base_opacity_effect.setOpacity(1.0)
+            self.overlay_label.hide()
+            self._overlay_opacity_effect.setOpacity(0.0)
+
+        # Connect only once: use the overlay anim as the finisher
+        self._fade_in_anim.finished.connect(on_finished)
+
+        # Start animations
+        self._fade_out_anim.start()
+        self._fade_in_anim.start()
 
     def _set_image_direct(self, pixmap: QPixmap) -> None:
         """Set image directly without transition."""
@@ -207,6 +334,53 @@ class ImageViewer(QWidget):
         self._restore_pan_position()
 
         self._update_display()
+
+    def _set_image_for_transition(self, pixmap: QPixmap) -> None:
+        """Set image for transition without calling _update_display()."""
+        # Save current pan position and zoom level before changing images
+        self._save_pan_position()
+        self._save_zoom_level()
+
+        self.original_pixmap = pixmap
+
+        # Auto-fit to window if enabled, but only if user hasn't manually
+        # zoomed
+        if self.fit_to_window and not self.user_has_zoomed:
+            # Calculate zoom factor to fit the image
+            label_size = self.image_label.size()
+            image_size = self.original_pixmap.size()
+
+            scale_x = label_size.width() / image_size.width()
+            scale_y = label_size.height() / image_size.height()
+
+            # Use the smaller scale to ensure the image fits
+            # 90% to add some margin
+            self.zoom_factor = min(scale_x, scale_y) * 0.9
+
+            # Reset pan offset
+            self.pan_offset_x = 0
+            self.pan_offset_y = 0
+        else:
+            # Restore zoom level if user has manually zoomed or fit_to_window
+            # is disabled
+            self.zoom_factor = self.saved_zoom_factor
+
+        # Restore saved pan position
+        self.pan_offset_x = self.saved_pan_offset_x
+        self.pan_offset_y = self.saved_pan_offset_y
+
+        # Calculate scaled size for the new image
+        scaled_width = int(self.original_pixmap.width() * self.zoom_factor)
+        scaled_height = int(self.original_pixmap.height() * self.zoom_factor)
+
+        # Create scaled pixmap
+        self.display_pixmap = self.original_pixmap.scaled(
+            scaled_width, scaled_height,
+            Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.SmoothTransformation
+        )
+
+        # Don't call _update_display() - let the transition animation handle it
 
     def clear_image(self) -> None:
         """Clear the displayed image."""
@@ -264,7 +438,7 @@ class ImageViewer(QWidget):
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
         # Apply transition opacity
-        painter.setOpacity(self.transition_opacity)
+        painter.setOpacity(self._transition_opacity)
 
         # Calculate position to center the image
         x = (label_size.width() - self.display_pixmap.width()) // 2
@@ -284,6 +458,42 @@ class ImageViewer(QWidget):
 
         # Set the final pixmap
         self.image_label.setPixmap(final_pixmap)
+
+    def _create_buffer_with_opacity(self, pixmap: QPixmap,
+                                    opacity: float) -> QPixmap:
+        """Create a buffer with the specified opacity."""
+        if pixmap is None:
+            return None
+
+        # Create a new pixmap with the same size as the label
+        label_size = self.image_label.size()
+        buffer_pixmap = QPixmap(label_size)
+        buffer_pixmap.fill(Qt.GlobalColor.transparent)
+
+        # Create painter
+        painter = QPainter(buffer_pixmap)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        # Apply opacity
+        painter.setOpacity(opacity)
+
+        # Calculate position to center the image
+        x = (label_size.width() - pixmap.width()) // 2
+        y = (label_size.height() - pixmap.height()) // 2
+
+        # Apply pan offset
+        x += self.pan_offset_x
+        y += self.pan_offset_y
+
+        # Convert to integers for drawPixmap
+        x = int(x)
+        y = int(y)
+
+        # Draw the image
+        painter.drawPixmap(x, y, pixmap)
+        painter.end()
+
+        return buffer_pixmap
 
     def _update_button_states(self) -> None:
         """Update the enabled state of control buttons."""
@@ -431,6 +641,9 @@ class ImageViewer(QWidget):
         super().resizeEvent(event)
         if self.original_pixmap is not None:
             self._update_display()
+        # Keep overlay aligned with the base label
+        if hasattr(self, 'overlay_label') and self.overlay_label is not None:
+            self.overlay_label.setGeometry(self.image_label.geometry())
 
     def get_current_zoom(self) -> float:
         """Get the current zoom factor."""
@@ -571,7 +784,7 @@ class ImageViewer(QWidget):
         self.user_has_zoomed = False
 
     def _start_smooth_transition(self, next_pixmap: QPixmap) -> None:
-        """Start a smooth transition to the next image."""
+        """Start a smooth transition using double buffering."""
         # Stop any existing transition
         if self.transition_animation:
             self.transition_animation.stop()
@@ -579,32 +792,51 @@ class ImageViewer(QWidget):
         # Store the next image
         self.next_pixmap = next_pixmap
 
-        # Create fade-out animation
+        # Prepare the new image in the hidden buffer
+        self._prepare_hidden_buffer(next_pixmap)
+
+        # Create fade-out animation for visible buffer
         self.transition_animation = QPropertyAnimation(
             self, b"transition_opacity")
-        self.transition_animation.setDuration(300)  # 300ms transition
+        self.transition_animation.setDuration(800)  # 800ms transition
         self.transition_animation.setStartValue(1.0)
         self.transition_animation.setEndValue(0.0)
         self.transition_animation.setEasingCurve(
-            QEasingCurve.Type.InOutQuad)
+            QEasingCurve.Type.InOutCubic)
         self.transition_animation.finished.connect(
-            self._on_transition_finished)
+            self._on_fade_out_finished)
         self.transition_animation.start()
 
-    def _on_transition_finished(self) -> None:
-        """Handle transition animation completion."""
-        # Switch to the next image
-        self._set_image_direct(self.next_pixmap)
+    def _prepare_hidden_buffer(self, next_pixmap: QPixmap) -> None:
+        """Prepare the hidden buffer with the next image."""
+        # Set up the new image
+        self._set_image_for_transition(next_pixmap)
+
+        # Create the hidden buffer with 0 opacity (invisible)
+        self.hidden_buffer = self._create_buffer_with_opacity(
+            self.display_pixmap, 0.0)
+        self._buffer_opacity = 0.0
+
+    def _on_fade_out_finished(self) -> None:
+        """Handle fade-out completion - swap buffers and start fade-in."""
+        # Swap buffers: hidden becomes visible, visible becomes hidden
+        self.visible_buffer = self.hidden_buffer
+        self.hidden_buffer = None
+
+        # Update the display with the new visible buffer
+        self.image_label.setPixmap(self.visible_buffer)
+
+        # Clean up
         self.next_pixmap = None
 
-        # Start fade-in animation
+        # Start fade-in animation for the new visible buffer
         self.transition_animation = QPropertyAnimation(
-            self, b"transition_opacity")
-        self.transition_animation.setDuration(300)  # 300ms transition
+            self, b"buffer_opacity")
+        self.transition_animation.setDuration(800)  # 800ms transition
         self.transition_animation.setStartValue(0.0)
         self.transition_animation.setEndValue(1.0)
         self.transition_animation.setEasingCurve(
-            QEasingCurve.Type.InOutQuad)
+            QEasingCurve.Type.InOutCubic)
         self.transition_animation.finished.connect(
             self._on_transition_complete)
         self.transition_animation.start()
@@ -612,12 +844,32 @@ class ImageViewer(QWidget):
     def _on_transition_complete(self) -> None:
         """Handle transition completion."""
         self.transition_animation = None
+        # Reset to normal display mode
+        self._transition_opacity = 1.0
+        self._buffer_opacity = 1.0
 
-    def get_transition_opacity(self) -> float:
+    @pyqtProperty(float)
+    def transition_opacity(self) -> float:
         """Get the current transition opacity (for animation)."""
-        return self.transition_opacity
+        return self._transition_opacity
 
-    def set_transition_opacity(self, opacity: float) -> None:
+    @transition_opacity.setter
+    def transition_opacity(self, opacity: float) -> None:
         """Set the transition opacity (for animation)."""
-        self.transition_opacity = opacity
+        self._transition_opacity = opacity
         self._update_display()
+
+    @pyqtProperty(float)
+    def buffer_opacity(self) -> float:
+        """Get the current buffer opacity (for animation)."""
+        return self._buffer_opacity
+
+    @buffer_opacity.setter
+    def buffer_opacity(self, opacity: float) -> None:
+        """Set the buffer opacity (for animation)."""
+        self._buffer_opacity = opacity
+        if self.visible_buffer is not None:
+            # Update the visible buffer with new opacity
+            updated_buffer = self._create_buffer_with_opacity(
+                self.display_pixmap, opacity)
+            self.image_label.setPixmap(updated_buffer)

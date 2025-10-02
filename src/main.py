@@ -84,6 +84,15 @@ def parse_arguments() -> argparse.Namespace:
         default=5.0,
         help="Slideshow interval in seconds (default: 5.0)"
     )
+    parser.add_argument(
+        "--transition-duration",
+        type=float,
+        default=0.8,
+        help=(
+            "Crossfade duration in seconds for slideshow/image transitions "
+            "(default: 0.8)"
+        )
+    )
 
     return parser.parse_args()
 
@@ -181,7 +190,8 @@ def main() -> int:
                 image_manager=image_manager,
                 fit_to_window=not args.no_fit_window,  # Default enabled
                 fullscreen_mode=True,
-                slideshow_interval=args.slideshow_interval
+                slideshow_interval=args.slideshow_interval,
+                transition_duration=args.transition_duration
             )
         elif args.viewing_mode:
             main_window = ViewingWindow(

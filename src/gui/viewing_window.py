@@ -39,7 +39,8 @@ class ViewingWindow(QMainWindow):
 
     def __init__(self, image_manager: ImageManager,
                  fit_to_window: bool = True, fullscreen_mode: bool = False,
-                 slideshow_interval: float = 5.0):
+                 slideshow_interval: float = 5.0,
+                 transition_duration: float = 0.8):
         """
         Initialize the viewing window.
 
@@ -56,6 +57,7 @@ class ViewingWindow(QMainWindow):
         self.fit_to_window = fit_to_window
         self.fullscreen_mode = fullscreen_mode
         self.slideshow_interval = slideshow_interval
+        self.transition_duration = transition_duration
 
         # Shuffle state
         self.is_shuffled = False
@@ -84,6 +86,9 @@ class ViewingWindow(QMainWindow):
             self.showFullScreen()
 
         self.logger.info("Viewing window initialized")
+
+        # Internal: whether the next image load should use a smooth transition
+        self._slideshow_transition = False
 
     def _setup_ui(self) -> None:
         """Setup the minimal user interface."""
@@ -225,7 +230,12 @@ class ViewingWindow(QMainWindow):
     def _on_image_changed(self, image_path: Path, current: int,
                           total: int) -> None:
         """Handle image change events."""
-        self._load_current_image()
+        # If a slideshow-initiated change just occurred, use smooth transition
+        if getattr(self, '_slideshow_transition', False):
+            self._slideshow_transition = False
+            self._load_current_image(smooth_transition=True)
+        else:
+            self._load_current_image()
 
         if not self.fullscreen_mode:
             # Update image counter
@@ -436,12 +446,13 @@ class ViewingWindow(QMainWindow):
             return
 
         # Try to go to next image
+        # Mark that the next image load should use a smooth transition
+        self._slideshow_transition = True
         if not self.image_manager.next_image():
             # If at the end, loop back to the beginning
             self.image_manager.go_to_image(0)
-
-        # Load the new image with smooth transition
-        self._load_current_image(smooth_transition=True)
+        # Do not call _load_current_image here; let the image_changed signal
+        # trigger a single load using the smooth transition flag
 
     def _navigate_by_offset(self, offset: int) -> None:
         """Navigate by a specific offset from current position."""
