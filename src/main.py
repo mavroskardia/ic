@@ -78,6 +78,12 @@ def parse_arguments() -> argparse.Namespace:
         type=int,
         help="Maximum number of images to discover initially (for performance)"
     )
+    parser.add_argument(
+        "--slideshow-interval",
+        type=float,
+        default=5.0,
+        help="Slideshow interval in seconds (default: 5.0)"
+    )
 
     return parser.parse_args()
 
@@ -174,7 +180,8 @@ def main() -> int:
             main_window = ViewingWindow(
                 image_manager=image_manager,
                 fit_to_window=not args.no_fit_window,  # Default enabled
-                fullscreen_mode=True
+                fullscreen_mode=True,
+                slideshow_interval=args.slideshow_interval
             )
         elif args.viewing_mode:
             main_window = ViewingWindow(

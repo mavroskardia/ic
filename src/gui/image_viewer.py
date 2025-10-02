@@ -1,12 +1,19 @@
 """
 Image Viewer widget for the Image Classifier application.
 
-This module provides a widget for displaying images with zoom and pan capabilities.
+This module provides a widget for displaying images with zoom and pan
+capabilities.
 """
 
-from PyQt6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton
-from PyQt6.QtCore import Qt, pyqtSignal, QRect
-from PyQt6.QtGui import QPixmap, QPainter, QWheelEvent, QMouseEvent, QKeyEvent
+from PyQt6.QtWidgets import (
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton
+)
+from PyQt6.QtCore import (
+    Qt, pyqtSignal, QRect, QPropertyAnimation, QEasingCurve
+)
+from PyQt6.QtGui import (
+    QPixmap, QPainter, QWheelEvent, QMouseEvent, QKeyEvent
+)
 
 
 class ImageViewer(QWidget):
@@ -56,6 +63,11 @@ class ImageViewer(QWidget):
         # Zoom level memory
         self.saved_zoom_factor = 1.0
         self.user_has_zoomed = False  # Track if user has manually zoomed
+
+        # Transition properties
+        self.transition_opacity = 1.0
+        self.transition_animation = None
+        self.next_pixmap = None  # Store next image for transition
 
         # Setup UI
         self._setup_ui()
@@ -153,29 +165,42 @@ class ImageViewer(QWidget):
             self.image_label.mouseReleaseEvent = self._mouse_release_event
             self.image_label.wheelEvent = self._wheel_event
 
-    def set_image(self, pixmap: QPixmap) -> None:
+    def set_image(self, pixmap: QPixmap,
+                  smooth_transition: bool = False) -> None:
         """
         Set the image to display.
 
         Args:
             pixmap: The image to display
+            smooth_transition: Whether to use smooth transition animation
         """
         if pixmap is None:
             self.clear_image()
             return
 
+        if (smooth_transition and
+                self.original_pixmap is not None):
+            # Start smooth transition
+            self._start_smooth_transition(pixmap)
+        else:
+            # Direct image change
+            self._set_image_direct(pixmap)
+
+    def _set_image_direct(self, pixmap: QPixmap) -> None:
+        """Set image directly without transition."""
         # Save current pan position and zoom level before changing images
         self._save_pan_position()
         self._save_zoom_level()
 
         self.original_pixmap = pixmap
 
-        # Auto-fit to window if enabled, but only if user hasn't manually zoomed
+        # Auto-fit to window if enabled, but only if user hasn't manually
+        # zoomed
         if self.fit_to_window and not self.user_has_zoomed:
             self._fit_to_window()
         else:
-            # Restore zoom level if user has manually zoomed or
-            # fit_to_window is disabled
+            # Restore zoom level if user has manually zoomed or fit_to_window
+            # is disabled
             self._restore_zoom_level()
 
         # Restore saved pan position
@@ -236,6 +261,10 @@ class ImageViewer(QWidget):
 
         # Create painter
         painter = QPainter(final_pixmap)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        # Apply transition opacity
+        painter.setOpacity(self.transition_opacity)
 
         # Calculate position to center the image
         x = (label_size.width() - self.display_pixmap.width()) // 2
@@ -264,9 +293,10 @@ class ImageViewer(QWidget):
         has_image = self.original_pixmap is not None
         can_zoom_in = has_image and self.zoom_factor < 5.0
         can_zoom_out = has_image and self.zoom_factor > 0.1
-        can_reset = has_image and (self.zoom_factor != 1.0 or
-                                   self.pan_offset_x != 0 or
-                                   self.pan_offset_y != 0)
+        can_reset = (has_image and
+                     (self.zoom_factor != 1.0 or
+                      self.pan_offset_x != 0 or
+                      self.pan_offset_y != 0))
 
         self.zoom_in_button.setEnabled(can_zoom_in)
         self.zoom_out_button.setEnabled(can_zoom_out)
@@ -280,7 +310,8 @@ class ImageViewer(QWidget):
 
         self.zoom_factor *= 1.25
         self.zoom_factor = min(self.zoom_factor, 5.0)
-        self.user_has_zoomed = True  # Mark that user has manually zoomed
+        # Mark that user has manually zoomed
+        self.user_has_zoomed = True
         self._update_display()
         self._save_pan_position()
         self._save_zoom_level()
@@ -292,7 +323,8 @@ class ImageViewer(QWidget):
 
         self.zoom_factor /= 1.25
         self.zoom_factor = max(self.zoom_factor, 0.1)
-        self.user_has_zoomed = True  # Mark that user has manually zoomed
+        # Mark that user has manually zoomed
+        self.user_has_zoomed = True
         self._update_display()
         self._save_pan_position()
         self._save_zoom_level()
@@ -310,7 +342,8 @@ class ImageViewer(QWidget):
         scale_y = label_size.height() / image_size.height()
 
         # Use the smaller scale to ensure the image fits
-        self.zoom_factor = min(scale_x, scale_y) * 0.9  # 90% to add some margin
+        # 90% to add some margin
+        self.zoom_factor = min(scale_x, scale_y) * 0.9
 
         # Reset pan offset
         self.pan_offset_x = 0
@@ -323,13 +356,15 @@ class ImageViewer(QWidget):
         self.zoom_factor = 1.0
         self.pan_offset_x = 0
         self.pan_offset_y = 0
-        self.user_has_zoomed = False  # Reset manual zoom flag
+        # Reset manual zoom flag
+        self.user_has_zoomed = False
         self._update_display()
         self._save_zoom_level()
 
     def _mouse_press_event(self, event: QMouseEvent) -> None:
         """Handle mouse press events."""
-        if event.button() == Qt.MouseButton.LeftButton and not self.crop_mode_active:
+        if (event.button() == Qt.MouseButton.LeftButton and
+                not self.crop_mode_active):
             self.is_panning = True
             self.last_mouse_pos = event.pos()
             self.setCursor(Qt.CursorShape.ClosedHandCursor)
@@ -358,7 +393,8 @@ class ImageViewer(QWidget):
 
     def _mouse_release_event(self, event: QMouseEvent) -> None:
         """Handle mouse release events."""
-        if event.button() == Qt.MouseButton.LeftButton and not self.crop_mode_active:
+        if (event.button() == Qt.MouseButton.LeftButton and
+                not self.crop_mode_active):
             self.is_panning = False
             self.last_mouse_pos = None
             self.setCursor(Qt.CursorShape.ArrowCursor)
@@ -444,7 +480,8 @@ class ImageViewer(QWidget):
         x += self.pan_offset_x
         y += self.pan_offset_y
 
-        return (x, y, self.display_pixmap.width(), self.display_pixmap.height())
+        return (x, y, self.display_pixmap.width(),
+                self.display_pixmap.height())
 
     def convert_widget_to_image_coords(self, widget_rect: QRect) -> QRect:
         """
@@ -480,8 +517,10 @@ class ImageViewer(QWidget):
         # Ensure coordinates are within image bounds
         img_rect_x = max(0, min(img_rect_x, self.original_pixmap.width()))
         img_rect_y = max(0, min(img_rect_y, self.original_pixmap.height()))
-        img_rect_width = max(0, min(img_rect_width, self.original_pixmap.width() - img_rect_x))
-        img_rect_height = max(0, min(img_rect_height, self.original_pixmap.height() - img_rect_y))
+        img_rect_width = max(0, min(
+            img_rect_width, self.original_pixmap.width() - img_rect_x))
+        img_rect_height = max(0, min(
+            img_rect_height, self.original_pixmap.height() - img_rect_y))
 
         return QRect(img_rect_x, img_rect_y, img_rect_width, img_rect_height)
 
@@ -490,7 +529,8 @@ class ImageViewer(QWidget):
         Set the crop mode state.
 
         Args:
-            active: True to enable crop mode (disable panning), False to disable
+            active: True to enable crop mode (disable panning), False to
+                disable
         """
         self.crop_mode_active = active
 
@@ -527,4 +567,57 @@ class ImageViewer(QWidget):
         # Also reset zoom memory
         self.saved_zoom_factor = 1.0
         self.zoom_factor = 1.0
-        self.user_has_zoomed = False  # Reset manual zoom flag
+        # Reset manual zoom flag
+        self.user_has_zoomed = False
+
+    def _start_smooth_transition(self, next_pixmap: QPixmap) -> None:
+        """Start a smooth transition to the next image."""
+        # Stop any existing transition
+        if self.transition_animation:
+            self.transition_animation.stop()
+
+        # Store the next image
+        self.next_pixmap = next_pixmap
+
+        # Create fade-out animation
+        self.transition_animation = QPropertyAnimation(
+            self, b"transition_opacity")
+        self.transition_animation.setDuration(300)  # 300ms transition
+        self.transition_animation.setStartValue(1.0)
+        self.transition_animation.setEndValue(0.0)
+        self.transition_animation.setEasingCurve(
+            QEasingCurve.Type.InOutQuad)
+        self.transition_animation.finished.connect(
+            self._on_transition_finished)
+        self.transition_animation.start()
+
+    def _on_transition_finished(self) -> None:
+        """Handle transition animation completion."""
+        # Switch to the next image
+        self._set_image_direct(self.next_pixmap)
+        self.next_pixmap = None
+
+        # Start fade-in animation
+        self.transition_animation = QPropertyAnimation(
+            self, b"transition_opacity")
+        self.transition_animation.setDuration(300)  # 300ms transition
+        self.transition_animation.setStartValue(0.0)
+        self.transition_animation.setEndValue(1.0)
+        self.transition_animation.setEasingCurve(
+            QEasingCurve.Type.InOutQuad)
+        self.transition_animation.finished.connect(
+            self._on_transition_complete)
+        self.transition_animation.start()
+
+    def _on_transition_complete(self) -> None:
+        """Handle transition completion."""
+        self.transition_animation = None
+
+    def get_transition_opacity(self) -> float:
+        """Get the current transition opacity (for animation)."""
+        return self.transition_opacity
+
+    def set_transition_opacity(self, opacity: float) -> None:
+        """Set the transition opacity (for animation)."""
+        self.transition_opacity = opacity
+        self._update_display()

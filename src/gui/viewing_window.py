@@ -38,7 +38,8 @@ class ViewingWindow(QMainWindow):
     aboutToQuit = pyqtSignal()
 
     def __init__(self, image_manager: ImageManager,
-                 fit_to_window: bool = True, fullscreen_mode: bool = False):
+                 fit_to_window: bool = True, fullscreen_mode: bool = False,
+                 slideshow_interval: float = 5.0):
         """
         Initialize the viewing window.
 
@@ -46,6 +47,7 @@ class ViewingWindow(QMainWindow):
             image_manager: Manager for image operations
             fit_to_window: Automatically fit images to window when loaded
             fullscreen_mode: Launch in fullscreen mode with no UI elements
+            slideshow_interval: Interval in seconds for slideshow mode
         """
         super().__init__()
 
@@ -53,10 +55,16 @@ class ViewingWindow(QMainWindow):
         self.image_manager = image_manager
         self.fit_to_window = fit_to_window
         self.fullscreen_mode = fullscreen_mode
+        self.slideshow_interval = slideshow_interval
 
         # Shuffle state
         self.is_shuffled = False
         self.original_image_order = []
+
+        # Slideshow state
+        self.slideshow_active = False
+        self.slideshow_timer = QTimer()
+        self.slideshow_timer.timeout.connect(self._slideshow_next_image)
 
         # Setup logging
         self.logger = logging.getLogger(__name__)
@@ -205,11 +213,11 @@ class ViewingWindow(QMainWindow):
         reset_pan_action.triggered.connect(self._reset_pan_memory)
         view_menu.addAction(reset_pan_action)
 
-    def _load_current_image(self) -> None:
+    def _load_current_image(self, smooth_transition: bool = False) -> None:
         """Load and display the current image."""
         current_image = self.image_manager.get_current_image()
         if current_image:
-            self.image_viewer.set_image(current_image)
+            self.image_viewer.set_image(current_image, smooth_transition)
         else:
             self.image_viewer.clear_image()
 
@@ -398,6 +406,43 @@ class ViewingWindow(QMainWindow):
         # Reload current image with reset pan position
         self._load_current_image()
 
+    def _start_slideshow(self) -> None:
+        """Start the slideshow mode."""
+        if not self.image_manager.image_files:
+            return
+
+        self.slideshow_active = True
+        # Convert to milliseconds
+        self.slideshow_timer.start(int(self.slideshow_interval * 1000))
+        self.logger.info(
+            f"Slideshow started with {self.slideshow_interval}s interval")
+
+    def _stop_slideshow(self) -> None:
+        """Stop the slideshow mode."""
+        self.slideshow_active = False
+        self.slideshow_timer.stop()
+        self.logger.info("Slideshow stopped")
+
+    def _toggle_slideshow(self) -> None:
+        """Toggle slideshow mode on/off."""
+        if self.slideshow_active:
+            self._stop_slideshow()
+        else:
+            self._start_slideshow()
+
+    def _slideshow_next_image(self) -> None:
+        """Advance to the next image during slideshow."""
+        if not self.slideshow_active:
+            return
+
+        # Try to go to next image
+        if not self.image_manager.next_image():
+            # If at the end, loop back to the beginning
+            self.image_manager.go_to_image(0)
+
+        # Load the new image with smooth transition
+        self._load_current_image(smooth_transition=True)
+
     def _navigate_by_offset(self, offset: int) -> None:
         """Navigate by a specific offset from current position."""
         current_index = self.image_manager.current_index
@@ -439,10 +484,19 @@ class ViewingWindow(QMainWindow):
     def keyPressEvent(self, event) -> None:
         """Handle key press events."""
         if event.key() == Qt.Key.Key_Left:
+            # Stop slideshow if active
+            if self.slideshow_active:
+                self._stop_slideshow()
             self.image_manager.previous_image()
         elif event.key() == Qt.Key.Key_Right:
+            # Stop slideshow if active
+            if self.slideshow_active:
+                self._stop_slideshow()
             self.image_manager.next_image()
         elif event.key() == Qt.Key.Key_Space:
+            # Stop slideshow if active
+            if self.slideshow_active:
+                self._stop_slideshow()
             # Toggle between next/previous
             if event.modifiers() & Qt.KeyboardModifier.ShiftModifier:
                 self.image_manager.previous_image()
@@ -460,6 +514,9 @@ class ViewingWindow(QMainWindow):
             # U key - unshuffle images
             self._unshuffle_images()
         elif event.key() == Qt.Key.Key_Escape:
+            # Stop slideshow if active
+            if self.slideshow_active:
+                self._stop_slideshow()
             # Escape key - exit viewing mode
             self.close()
         elif event.key() == Qt.Key.Key_F11:
@@ -469,19 +526,33 @@ class ViewingWindow(QMainWindow):
             # C key - reset pan position memory
             self._reset_pan_memory()
         elif event.key() == Qt.Key.Key_PageUp:
+            # Stop slideshow if active
+            if self.slideshow_active:
+                self._stop_slideshow()
             # Page Up - go back 10 images
             self._navigate_by_offset(-10)
         elif event.key() == Qt.Key.Key_PageDown:
+            # Stop slideshow if active
+            if self.slideshow_active:
+                self._stop_slideshow()
             # Page Down - go forward 10 images
             self._navigate_by_offset(10)
         elif event.key() == Qt.Key.Key_G:
             # G key - go to specific image number
             self._go_to_image_prompt()
+        elif event.key() == Qt.Key.Key_A:
+            # A key - toggle slideshow (only in fullscreen mode)
+            if self.fullscreen_mode:
+                self._toggle_slideshow()
         else:
             super().keyPressEvent(event)
 
     def closeEvent(self, event) -> None:
         """Handle window close event."""
+        # Stop slideshow if active
+        if self.slideshow_active:
+            self._stop_slideshow()
+
         # Print current image index to console
         current_index = self.image_manager.current_index
         total_count = self.image_manager.get_total_count()
